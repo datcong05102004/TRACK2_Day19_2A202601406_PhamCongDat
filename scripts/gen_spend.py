@@ -1,38 +1,27 @@
-"""Generate the parquet source for the on-demand feature demo (NB8)."""
-from __future__ import annotations
-
-import sys
+﻿"""Generate synthetic spend data for on-demand feature demo (NB8)."""
 from pathlib import Path
+import polars as pl
+from datetime import datetime, timedelta, timezone
 
-import numpy as np
-import pandas as pd
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
+DATA_DIR = Path(__file__).resolve().parent.parent / "app" / "feast_repo_ondemand" / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "app" / "feast_repo_ondemand" / "data"
+# 10 users x 20 transactions
+n_users = 10
+n_txns = 20
+rows = []
+for u in range(n_users):
+    uid = f"u_{u:03d}"
+    for t in range(n_txns):
+        rows.append({
+            "user_id": uid,
+            "transaction_id": f"txn_{uid}_{t:03d}",
+            "amount_usd": round(10.0 + (u * 7 + t * 3) % 200, 2),
+            "merchant_category": ["food", "tech", "travel", "retail"][(u + t) % 4],
+            "event_timestamp": NOW - timedelta(hours=(n_txns - t) * 3 + u * 10),
+        })
 
-
-def main() -> int:
-    OUT.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(42)
-    users = [f"u_{i:03d}" for i in range(50)]
-    now = pd.Timestamp.utcnow().tz_convert("UTC").floor("h")
-    rows = []
-    for u in users:
-        base = float(rng.uniform(50_000, 5_000_000))   # VND, wide spread on purpose
-        for days_ago in (2, 1, 0):
-            rows.append({
-                "user_id": u,
-                "event_timestamp": now - pd.Timedelta(f"{days_ago}D"),
-                "avg_amount_7d": round(base * float(rng.uniform(0.9, 1.1)), 2),
-                "txn_count_7d": int(rng.integers(3, 40)),
-                "created": now - pd.Timedelta(f"{days_ago}D"),
-            })
-    df = pd.DataFrame(rows)
-    path = OUT / "user_spend.parquet"
-    df.to_parquet(path, index=False)
-    print(f"wrote {path} ({len(df)} rows, {df.user_id.nunique()} users)")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+df = pl.DataFrame(rows)
+df.write_parquet(DATA_DIR / "transactions.parquet")
+print(f"Wrote {len(df)} transactions to {DATA_DIR / 'transactions.parquet'}")
