@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop the Apple-`container` stack. Volumes are kept unless --wipe is passed.
 # Equivalent of `docker compose down` / `docker compose down -v`.
-set -euo pipefail
+set -eo pipefail
 command -v container >/dev/null 2>&1 || { echo "[container] not installed"; exit 0; }
 
 for c in day19-qdrant day19-redis day19-postgres; do

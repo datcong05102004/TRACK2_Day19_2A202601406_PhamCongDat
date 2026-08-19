@@ -9,8 +9,6 @@
 # Run:  bash scripts/runtime-check.sh   (or `make runtime-check`)
 # Always exits 0: this is a report, not a gate.
 
-set -uo pipefail
-
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 row()  { printf '  %-22s %s\n' "$1" "$2"; }
 

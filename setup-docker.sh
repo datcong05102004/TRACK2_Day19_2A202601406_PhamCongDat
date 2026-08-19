@@ -2,7 +2,7 @@
 # Full Docker path: Qdrant server + Redis online store + Postgres offline store.
 # Same Python venv as lite + the docker extras. ~3-5 min on first run (image pulls).
 
-set -euo pipefail
+set -eo pipefail
 
 echo "[docker] Day 19 full Docker setup"
 echo "[docker] Stack: Qdrant (server) + Redis + Postgres + bge-m3 embeddings"
@@ -92,13 +92,22 @@ jupytext --to notebook --update notebooks/[0-9]*.py 2>/dev/null || jupytext --to
 if [ ! -f .env ]; then
   cp .env.example .env
   # Flip the lite defaults to docker — the user can edit afterward.
-  sed -i.bak \
-    -e 's/^QDRANT_MODE=memory/QDRANT_MODE=server/' \
-    -e 's/^EMBEDDING_BACKEND=fastembed/EMBEDDING_BACKEND=bge-m3/' \
-    -e 's/^FEAST_ONLINE_STORE=sqlite/FEAST_ONLINE_STORE=redis/' \
-    -e 's/^FEAST_OFFLINE_STORE=file/FEAST_OFFLINE_STORE=postgres/' \
-    .env
-  rm -f .env.bak
+  # Use Python for cross-platform sed-like editing (avoids sed -i differences on macOS/Windows)
+  python -c "
+import sys
+with open('.env', 'r') as f:
+    content = f.read()
+replacements = [
+    ('QDRANT_MODE=memory', 'QDRANT_MODE=server'),
+    ('EMBEDDING_BACKEND=fastembed', 'EMBEDDING_BACKEND=bge-m3'),
+    ('FEAST_ONLINE_STORE=sqlite', 'FEAST_ONLINE_STORE=redis'),
+    ('FEAST_OFFLINE_STORE=file', 'FEAST_OFFLINE_STORE=postgres'),
+]
+for old, new in replacements:
+    content = content.replace(old, new)
+with open('.env', 'w') as f:
+    f.write(content)
+"
 fi
 
 # ── 6. Seed corpus + smoke test ─────────────────────────────────────────
@@ -115,9 +124,9 @@ cat <<EOF
 
 [docker] Done. Services running:
 
-  Qdrant   → http://localhost:6333  (dashboard)
-  Redis    → redis://localhost:6379
-  Postgres → postgresql://feast:feast@localhost:5432/feast_offline
+  Qdrant   -> http://localhost:6333  (dashboard)
+  Redis    -> redis://localhost:6379
+  Postgres -> postgresql://feast:feast@localhost:5432/feast_offline
 
 Activate the venv and continue:
 

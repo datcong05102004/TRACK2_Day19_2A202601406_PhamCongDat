@@ -2,36 +2,82 @@
 # Lite path: pure Python, in-process Qdrant, SQLite Feast online store.
 # No Docker, no GPU, no external services. ~60s on a clean machine.
 
-set -euo pipefail
+set -eo pipefail
 
 echo "[lite] Day 19 lightweight setup"
 echo "[lite] Stack: fastembed + qdrant-client[memory] + rank-bm25 + feast(sqlite) + FastAPI"
 echo
 
-# ── 1. Python ───────────────────────────────────────────────────────────
-command -v python3 >/dev/null 2>&1 || { echo "[lite] python3 not found. Install Python 3.10+."; exit 1; }
-PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo "[lite] system python3 is $PY_VER (the venv may differ — reported below)"
+# ── 1. Find a working Python ─────────────────────────────────────────────
+# On Windows, Git Bash's msys2 python3 has broken venv support.
+# Use the Windows py launcher or find Python.exe directly.
+WIN_PY_PATH=""
 
-# ── 2. venv ─────────────────────────────────────────────────────────────
-if [ ! -d ".venv" ]; then
-  if command -v uv >/dev/null 2>&1; then
-    echo "[lite] Creating venv with uv (faster)"
-    uv venv .venv
-  else
-    echo "[lite] Creating venv with python -m venv"
-    python3 -m venv .venv
+if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* ]]; then
+  # Try Windows py launcher first
+  if command -v py >/dev/null 2>&1; then
+    # Get the actual executable path from py launcher
+    WIN_PY_PATH=$(py -3 -c "import sys; print(sys.executable)" 2>/dev/null)
+    if [ -n "$WIN_PY_PATH" ] && [ -f "$WIN_PY_PATH" ]; then
+      PY_VER=$(py -3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+      echo "[lite] Windows Python: $WIN_PY_PATH ($PY_VER)"
+    else
+      WIN_PY_PATH=""
+    fi
+  fi
+
+  # Fallback: search common Windows Python install paths
+  if [ -z "$WIN_PY_PATH" ]; then
+    for dir in "/c/Python"* "/c/Program Files/Python"* \
+               "/c/Users/${USER:-$(echo ~ | tr -d '~')}/AppData/Local/Programs/Python/Python"*; do
+      if [ -f "$dir/python.exe" ]; then
+        WIN_PY_PATH="$dir/python.exe"
+        PY_VER=$("$WIN_PY_PATH" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        echo "[lite] Found Python at $WIN_PY_PATH ($PY_VER)"
+        break
+      fi
+    done
   fi
 fi
-# shellcheck source=/dev/null
-source .venv/bin/activate
+
+# Final fallback: use system python3 (Linux/macOS/WSL)
+if [ -z "$WIN_PY_PATH" ]; then
+  command -v python3 >/dev/null 2>&1 || { echo "[lite] python3 not found. Install Python 3.10+."; exit 1; }
+  WIN_PY_PATH="python3"
+  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+  echo "[lite] system python3 is $PY_VER"
+fi
+
+# ── 2. venv ─────────────────────────────────────────────────────────────
+# uv is preferred (faster + cross-platform). Falls back to python -m venv.
+if [ ! -d ".venv" ] || [ ! -f ".venv/pyvenv.cfg" ]; then
+  rm -rf .venv
+  if command -v uv >/dev/null 2>&1; then
+    echo "[lite] Creating venv with uv"
+    uv venv .venv --python "$WIN_PY_PATH"
+  else
+    echo "[lite] Creating venv with $WIN_PY_PATH -m venv"
+    "$WIN_PY_PATH" -m venv .venv
+  fi
+fi
+
+# Activate: Windows uses Scripts/, Unix uses bin/.
+if [ -f ".venv/Scripts/activate" ]; then
+  # shellcheck source=/dev/null
+  source .venv/Scripts/activate
+elif [ -f ".venv/bin/activate" ]; then
+  # shellcheck source=/dev/null
+  source .venv/bin/activate
+else
+  echo "[lite] ERROR: activate script not found in .venv"
+  ls -la .venv/
+  exit 1
+fi
 
 # ── 3. Install deps ─────────────────────────────────────────────────────
-# `uv venv` may pick a different interpreter than the system `python3`, so the
-# dill decision must be made from the VENV's Python (already active here), not
-# from the version printed above.
+# After activation, `python` and `pip` point to the venv.
 VENV_PY_VER=$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-NEED_DILL_OVERRIDE=$(python -c 'import sys; print(1 if sys.version_info >= (3,14) else 0)')
+NEED_DILL_OVERRIDE=$(python -c 'import sys; print(1 if sys.version_info >= (3, 14) else 0)')
 echo "[lite] venv Python $VENV_PY_VER"
 if [ "$NEED_DILL_OVERRIDE" = "1" ]; then
   echo "[lite] Python >= 3.14 -> applying dill>=0.4 override (feast's pin is too old; see requirements.txt)"
@@ -72,11 +118,11 @@ python scripts/gen_spend.py
 # ── 7. Smoke test ───────────────────────────────────────────────────────
 python scripts/verify_lite.py
 
-cat <<EOF
+cat <<'EOF'
 
 [lite] Done. Activate the venv and start working:
 
-    source .venv/bin/activate
+    source .venv/bin/activate    # Linux / macOS / Git Bash
     make api       # start FastAPI on :8000
     make lab       # open Jupyter on :8888
     make benchmark # Precision@10 + latency table
